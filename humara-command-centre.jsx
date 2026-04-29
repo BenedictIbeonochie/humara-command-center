@@ -75,7 +75,10 @@ const S = {
   modalOverlay: {position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",backdropFilter:"blur(8px)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center"},
   modal: {background:"#12141c",border:"1px solid rgba(99,102,241,0.2)",borderRadius:16,padding:28,width:"100%",maxWidth:560,maxHeight:"80vh",overflowY:"auto",position:"relative"},
   reminderCard: {background:"linear-gradient(135deg,rgba(245,158,11,0.08),rgba(239,68,68,0.05))",border:"1px solid rgba(245,158,11,0.2)",borderRadius:12,padding:16,marginBottom:12},
+  helperText: {fontSize:11,color:"#64748b",marginTop:6,fontFamily:font},
 };
+
+const STORAGE_KEY = "humara-command-centre-state-v2";
 
 // ─── COMPONENTS ──────────────────────────────────────────────────────────────
 
@@ -270,6 +273,13 @@ function TasksTab({tasks, setTasks}) {
               <select style={{...S.select,fontSize:11,padding:"4px 8px"}} value={t.priority||"Medium"} onChange={e=>updateTask(t.id,"priority",e.target.value)}>
                 {PRIORITIES.map(p=><option key={p}>{p}</option>)}
               </select>
+              <span style={{fontSize:11,color:"#94a3b8",marginLeft:8}}>Due:</span>
+              <input
+                type="date"
+                style={{...S.select,fontSize:11,padding:"4px 8px"}}
+                value={t.due || ""}
+                onChange={e=>updateTask(t.id,"due",e.target.value)}
+              />
             </div>
             {subtasks.length>0 && <div>
               <div style={{fontSize:11,color:"#64748b",marginBottom:6,fontFamily:font}}>SUB-TASKS ({subtasks.length})</div>
@@ -482,11 +492,12 @@ function SlackTab() {
 }
 
 // ─── REQUESTS TAB ────────────────────────────────────────────────────────────
-function RequestsTab({tasks}) {
-  const [requests, setRequests] = useState([
-    {id:1,from:"Benedict Ibe",to:"Steven",title:"Review RewardsVault reentrancy guard implementation","desc":"Need a code review on the reentrancy guard pattern used in RewardsVault.sol before we move to internal audit.","priority":"High",status:"Open",created:"2h ago",linkedTask:"Write Rewards Vault contract"},
-    {id:2,from:"Steven",to:"Benedict Ibe",title:"Confirm Alchemy webhook endpoint URL","desc":"Which endpoint should the Alchemy webhook POST to? Need the exact route path for TI wallet activity monitoring.","priority":"Medium",status:"Open",created:"5h ago",linkedTask:"Alchemy web hook implementation (On TI Wallet activity)"},
-  ]);
+const DEFAULT_REQUESTS = [
+  {id:1,from:"Benedict Ibe",to:"Steven",title:"Review RewardsVault reentrancy guard implementation","desc":"Need a code review on the reentrancy guard pattern used in RewardsVault.sol before we move to internal audit.","priority":"High",status:"Open",created:"2h ago",linkedTask:"Write Rewards Vault contract"},
+  {id:2,from:"Steven",to:"Benedict Ibe",title:"Confirm Alchemy webhook endpoint URL","desc":"Which endpoint should the Alchemy webhook POST to? Need the exact route path for TI wallet activity monitoring.","priority":"Medium",status:"Open",created:"5h ago",linkedTask:"Alchemy web hook implementation (On TI Wallet activity)"},
+];
+
+function RequestsTab({tasks, requests, setRequests}) {
   const [showNew, setShowNew] = useState(false);
   const [newReq, setNewReq] = useState({from:"Benedict Ibe",to:"Steven",title:"",desc:"",priority:"Medium",linkedTask:""});
 
@@ -578,21 +589,31 @@ function RequestsTab({tasks}) {
 function RemindersTab({tasks}) {
   const [reminderConfig, setReminderConfig] = useState({daysBeforeDeadline:2,hoursBeforeDeadline:10,channel:"#humara-general",enabled:true});
 
-  // Simulate tasks with approaching deadlines
   const upcomingTasks = useMemo(()=>{
-    const withDeadlines = tasks.filter(t=>!t.parent && t.status!=="Done").slice(0,8).map((t,i)=>({
-      ...t,
-      simulatedDeadline: i<3 ? `${i+1} day${i>0?"s":""}, ${10-i*3} hours` : i<5 ? `${i+2} days` : `${i+5} days`,
-      urgency: i<3 ? "urgent" : i<5 ? "approaching" : "on-track"
-    }));
-    return withDeadlines;
-  },[tasks]);
+    const now = new Date();
+    const fallbackDays = [1, 2, 3, 4, 6, 8, 10, 12];
+    return tasks
+      .filter(t=>!t.parent && t.status!=="Done")
+      .slice(0,8)
+      .map((t,i)=>{
+        const deadline = t.due ? new Date(`${t.due}T23:59:59`) : new Date(now.getTime() + fallbackDays[i % fallbackDays.length] * 24 * 60 * 60 * 1000);
+        const diffMs = deadline - now;
+        const totalHours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+        const days = Math.floor(totalHours / 24);
+        const hours = totalHours % 24;
+        const timeLeftLabel = days > 0 ? `${days} day${days > 1 ? "s" : ""}, ${hours} hour${hours !== 1 ? "s" : ""}` : `${hours} hour${hours !== 1 ? "s" : ""}`;
+        const triggerHours = reminderConfig.daysBeforeDeadline * 24 + reminderConfig.hoursBeforeDeadline;
+        const urgency = totalHours <= triggerHours ? (totalHours <= 24 ? "urgent" : "approaching") : "on-track";
+        return {...t, deadline, timeLeftLabel, urgency};
+      })
+      .sort((a,b)=>a.deadline-b.deadline);
+  },[tasks, reminderConfig.daysBeforeDeadline, reminderConfig.hoursBeforeDeadline]);
 
   const generateReminder = (task) => {
     const urgencyMap = {
-      urgent: `Hi${task.assignee?` ${task.assignee.split(" ")[0]}`:""},\n\nHope you are progressing smoothly on "${task.name}". Kindly notify if you are facing challenges as we approach the deadline to this task which is in ${task.simulatedDeadline}.\n\nIf there are any blockers, please flag them in #humara-general so we can unblock you quickly.\n\nBest,\nHumara Command Centre`,
-      approaching: `Quick check-in on "${task.name}" — deadline is in ${task.simulatedDeadline}. Let us know if the timeline still works or if you need support.`,
-      "on-track": `Reminder: "${task.name}" is due in ${task.simulatedDeadline}. No action needed if on track.`
+      urgent: `Hi${task.assignee?` ${task.assignee.split(" ")[0]}`:""},\n\nHope you are progressing smoothly on "${task.name}". Kindly notify if you are facing challenges as we approach the deadline to this task which is in ${task.timeLeftLabel}.\n\nIf there are any blockers, please flag them in #humara-general so we can unblock you quickly.\n\nBest,\nHumara Command Centre`,
+      approaching: `Quick check-in on "${task.name}" — deadline is in ${task.timeLeftLabel}. Let us know if the timeline still works or if you need support.`,
+      "on-track": `Reminder: "${task.name}" is due in ${task.timeLeftLabel}. No action needed if on track.`
     };
     return urgencyMap[task.urgency];
   };
@@ -631,6 +652,7 @@ function RemindersTab({tasks}) {
           </button>
         </div>
       </div>
+      <div style={S.helperText}>Reminders are prioritized by actual task due dates when available. If a task has no due date, a temporary estimated deadline is used.</div>
     </div>
 
     <div style={{marginTop:20}}>
@@ -647,7 +669,7 @@ function RemindersTab({tasks}) {
                 <div style={{fontSize:14,fontWeight:600}}>{t.name}</div>
                 <div style={{display:"flex",gap:6,marginTop:6,alignItems:"center"}}>
                   {t.priority && <PriorityDot p={t.priority}/>}
-                  <span style={{fontSize:11,color:"#64748b",fontFamily:font}}>Deadline in {t.simulatedDeadline}</span>
+                  <span style={{fontSize:11,color:"#64748b",fontFamily:font}}>Deadline in {t.timeLeftLabel}</span>
                   {t.assignee && <span style={{fontSize:11,color:"#818cf8"}}>· {t.assignee}</span>}
                 </div>
               </div>
@@ -671,6 +693,29 @@ function RemindersTab({tasks}) {
 export default function HumaraCommandCentre() {
   const [activeTab, setActiveTab] = useState("overview");
   const [tasks, setTasks] = useState(RAW_TASKS);
+  const [requests, setRequests] = useState(DEFAULT_REQUESTS);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed.tasks)) setTasks(parsed.tasks);
+      if (Array.isArray(parsed.requests)) setRequests(parsed.requests);
+    } catch {
+      // ignore invalid persisted state
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({tasks, requests}));
+  }, [tasks, requests]);
+
+  const resetWorkspace = useCallback(() => {
+    setTasks(RAW_TASKS);
+    setRequests(DEFAULT_REQUESTS);
+    localStorage.removeItem(STORAGE_KEY);
+  }, []);
 
   const tabDefs = [
     {id:"overview",label:"Overview",icon:BarChart3},
@@ -678,8 +723,8 @@ export default function HumaraCommandCentre() {
     {id:"github",label:"GitHub",icon:GitBranch,badge:GITHUB_REPOS.length},
     {id:"notion",label:"Notion Docs",icon:FileText},
     {id:"slack",label:"Slack",icon:MessageSquare},
-    {id:"requests",label:"Requests",icon:Send,badge:"2",badgeColor:"rgba(245,158,11,0.3)"},
-    {id:"reminders",label:"Reminders",icon:Bell,badge:"3",badgeColor:"rgba(239,68,68,0.3)"},
+    {id:"requests",label:"Requests",icon:Send,badge:requests.filter(r=>r.status==="Open").length,badgeColor:"rgba(245,158,11,0.3)"},
+    {id:"reminders",label:"Reminders",icon:Bell,badge:tasks.filter(t=>!t.parent && t.status!=="Done").slice(0,3).length,badgeColor:"rgba(239,68,68,0.3)"},
   ];
 
   return <div style={S.root}>
@@ -696,6 +741,7 @@ export default function HumaraCommandCentre() {
           </div>
         </div>
         <div style={S.headerRight}>
+          <button style={S.btnSm(false)} onClick={resetWorkspace}><RefreshCw size={10}/> Reset Data</button>
           <div style={S.bellBtn}><Bell size={16}/><div style={S.bellDot}/></div>
           <div style={S.avatar}>BI</div>
         </div>
@@ -717,7 +763,7 @@ export default function HumaraCommandCentre() {
         {activeTab==="github" && <GitHubTab/>}
         {activeTab==="notion" && <NotionTab tasks={tasks}/>}
         {activeTab==="slack" && <SlackTab/>}
-        {activeTab==="requests" && <RequestsTab tasks={tasks}/>}
+        {activeTab==="requests" && <RequestsTab tasks={tasks} requests={requests} setRequests={setRequests}/>}
         {activeTab==="reminders" && <RemindersTab tasks={tasks}/>}
       </div>
     </div>
