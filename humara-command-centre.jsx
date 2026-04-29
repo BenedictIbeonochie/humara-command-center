@@ -302,7 +302,46 @@ function TasksTab({tasks, setTasks}) {
 // ─── GITHUB TAB ──────────────────────────────────────────────────────────────
 function GitHubTab() {
   const [activeRepo, setActiveRepo] = useState(null);
+  const [isGithubConnected, setIsGithubConnected] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
+
+  const handleGithubConnect = () => {
+    setIsGithubConnected(true);
+    setLastSyncedAt(new Date().toISOString());
+  };
+
+  const handleGithubDisconnect = () => {
+    setIsGithubConnected(false);
+  };
+
+  const handleSync = () => {
+    setLastSyncedAt(new Date().toISOString());
+  };
+
   return <div>
+    <div style={{...S.card,marginBottom:16}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:8,fontSize:14,fontWeight:700,color:"#c7d2fe"}}>
+            <GitBranch size={14}/>
+            GitHub Integration
+            <span style={{...S.pill(isGithubConnected?"rgba(34,197,94,0.16)":"rgba(245,158,11,0.16)",isGithubConnected?"#22c55e":"#f59e0b")}}>
+              {isGithubConnected ? "Connected" : "Not Connected"}
+            </span>
+          </div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:6,fontFamily:font}}>
+            {lastSyncedAt ? `Last sync: ${new Date(lastSyncedAt).toLocaleString()}` : "No sync has been run yet."}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {isGithubConnected ? <>
+            <button style={S.btn(false)} onClick={handleSync}><RefreshCw size={13}/> Sync Now</button>
+            <button style={S.btn(false)} onClick={handleGithubDisconnect}><X size={13}/> Disconnect</button>
+          </> : <button style={S.btn(true)} onClick={handleGithubConnect}><GitBranch size={13}/> Connect GitHub</button>}
+        </div>
+      </div>
+    </div>
+
     <div style={{...S.grid2,marginBottom:20}}>
       {GITHUB_REPOS.map((r,i)=><div key={i} style={{...S.card,cursor:"pointer",border:activeRepo===i?"1px solid rgba(99,102,241,0.4)":S.card.border}} onClick={()=>setActiveRepo(activeRepo===i?null:i)}>
         <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:10}}>
@@ -328,7 +367,10 @@ function GitHubTab() {
       <div style={S.cardHeader}>
         <div style={S.cardTitle}><Clock size={16} color="#818cf8"/> Recent Activity</div>
       </div>
-      {GITHUB_ACTIVITY.map((a,i)=><div key={i} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"10px 0",borderTop:i>0?"1px solid rgba(99,102,241,0.06)":"none"}}>
+      {!isGithubConnected && <div style={{fontSize:12,color:"#94a3b8",padding:"8px 0 12px"}}>
+        Connect GitHub to enable live activity syncing. Showing sample activity until connected.
+      </div>}
+      {(isGithubConnected ? GITHUB_ACTIVITY : GITHUB_ACTIVITY.slice(0,3)).map((a,i)=><div key={i} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"10px 0",borderTop:i>0?"1px solid rgba(99,102,241,0.06)":"none"}}>
         <div style={{width:32,height:32,borderRadius:8,background:a.type==="commit"?"rgba(34,197,94,0.12)":a.type==="pr"?"rgba(168,85,247,0.12)":"rgba(239,68,68,0.12)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
           {a.type==="commit"?<CheckCircle2 size={14} color="#22c55e"/>:a.type==="pr"?<GitBranch size={14} color="#a855f7"/>:<AlertTriangle size={14} color="#ef4444"/>}
         </div>
@@ -350,7 +392,7 @@ function GitHubTab() {
       <p style={{fontSize:12,color:"#94a3b8",margin:0,lineHeight:1.6}}>
         Connect your GitHub account to enable live commit tracking, PR status updates, automated build version tagging, and push notifications to Slack channels. Click below to authenticate via GitHub OAuth.
       </p>
-      <button style={{...S.btn(true),marginTop:12}}><GitBranch size={14}/> Connect GitHub <ExternalLink size={12}/></button>
+      <button style={{...S.btn(true),marginTop:12}} onClick={handleGithubConnect}><GitBranch size={14}/> Connect GitHub <ExternalLink size={12}/></button>
     </div>
   </div>;
 }
